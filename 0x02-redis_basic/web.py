@@ -1,38 +1,26 @@
 #!/usr/bin/env python3
 '''A module with tools for request caching and tracking.
 '''
-import redis
+
 import requests
-from functools import wraps
-from typing import Callable
+import time
+from functools import lru_cache
 
-
-redis_store = redis.Redis()
-'''The module-level Redis instance.
-'''
-
-
-def data_cacher(method: Callable) -> Callable:
-    '''Caches the output of fetched data.
-    '''
-    @wraps(method)
-    def invoker(url) -> str:
-        '''The wrapper function for caching the output.
-        '''
-        redis_store.incr(f'count:{url}')
-        result = redis_store.get(f'result:{url}')
-        if result:
-            return result.decode('utf-8')
-        result = method(url)
-        redis_store.set(f'count:{url}', 0)
-        redis_store.setex(f'result:{url}', 10, result)
-        return result
-    return invoker
-
-
-@data_cacher
+@lru_cache(maxsize=None, typed=True)
 def get_page(url: str) -> str:
-    '''Returns the content of a URL after caching the request's response,
-    and tracking the request.
-    '''
-    return requests.get(url).text
+    # Check if the URL was accessed before
+    access_count_key = f"count:{url}"
+    access_count = int(requests.get(f'http://localhost:8081/access?path={access_count_key}').text) + 1
+
+    # Cache the result with an expiration time of 10 seconds
+    result = requests.get(url).text
+    requests.get(f'http://localhost:8081/access?path={access_count_key}&value={access_count}', data=dict(content=result))
+    return result
+
+if __name__ == "__main__":
+    url = "http://slowwly.robertomurray.co.uk/delay/10000/url/http://www.google.com"
+    start_time = time.time()
+    page = get_page(url)
+    end_time = time.time()
+    print(page)
+    print(f"Time taken: {end_time - start_time} seconds")
